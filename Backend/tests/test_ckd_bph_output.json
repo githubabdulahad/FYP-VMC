@@ -1,0 +1,162 @@
+{
+  "soap": {
+    "subjective": "Patient presents for routine monitoring of stage 3 CKD and BPH. He notes consistent compliance with his current medications. Reports moderate urinary frequency and nocturia (awakening 3 times per night), which has mildly worsened over the last month. Denies dysuria, hematuria, flank pain, or peripheral edema. Energy levels are baseline.",
+    "objective": "Vital Signs: Blood Pressure: 126/74 mmHg, Pulse: 72 bpm, Temperature: 98.2\u00b0F, Weight: 195 lbs, eGFR: 44 mL/min/1.73m\u00b2, Serum Creatinine: 1.6 mg/dL. Physical Examination: General: Well-developed, well-nourished, in no acute distress. Abdomen: Soft, non-tender, no organomegaly or palpable bladder. Extremities: Trace ankle edema bilaterally, symmetric; peripheral pulses 2+. Genitourinary: Digital rectal exam (DRE) reveals an enlarged, smooth, non-tender prostate without discrete nodules.",
+    "assessment": "Chronic kidney disease, stage 3a \u2014 stable, monitoring renal function. Benign prostatic hyperplasia with lower urinary tract symptoms (LUTS) \u2014 mildly progressed. [Established patient]",
+    "plan": "Continue current renal protection strategies; avoid NSAIDs. Initiate tamsulosin 0.4mg daily at bedtime for worsening urinary symptoms. Order basic metabolic panel (BMP) to recheck creatinine and eGFR in 3 months. Counseled on fluid restriction prior to bedtime. Follow-up in 3 months."
+  },
+  "codes": [
+    {
+      "system": "ICD10",
+      "code": "N18.31",
+      "description": "Chronic kidney disease, stage 3a",
+      "confidence": 0.95,
+      "evidence_text": "Chronic kidney disease, stage 3a \u2014 stable, monitoring renal function",
+      "confidence_reason": "Explicitly documented in assessment",
+      "needs_review": true,
+      "review_reason": "Code format is valid (ICD10: N18.31) but not found in official database. High confidence (0.95) suggests possible new/emerging code, but requires human validation before billing use."
+    },
+    {
+      "system": "ICD10",
+      "code": "N40.1",
+      "description": "Benign prostatic hyperplasia with lower urinary tract symptoms",
+      "confidence": 0.95,
+      "evidence_text": "Benign prostatic hyperplasia with lower urinary tract symptoms (LUTS) \u2014 mildly progressed",
+      "confidence_reason": "Explicitly documented in assessment",
+      "db_description": "Benign prostatic hyperplasia with lower urinary tract symptoms"
+    },
+    {
+      "system": "ICD10",
+      "code": "R35.0",
+      "description": "Urinary frequency",
+      "confidence": 0.95,
+      "evidence_text": "Reports moderate urinary frequency",
+      "confidence_reason": "Explicitly documented in subjective",
+      "db_description": "Frequency of micturition"
+    },
+    {
+      "system": "ICD10",
+      "code": "R35.1",
+      "description": "Nocturia",
+      "confidence": 0.95,
+      "evidence_text": "Nocturia (awakening 3 times per night)",
+      "confidence_reason": "Explicitly documented in subjective",
+      "db_description": "Nocturia"
+    },
+    {
+      "system": "ICD10",
+      "code": "Z79.899",
+      "description": "Other long-term drug therapy",
+      "confidence": 0.85,
+      "evidence_text": "Continue current renal protection strategies",
+      "confidence_reason": "Documented in plan, specific medication not named",
+      "db_description": "Other long term (current) drug therapy"
+    },
+    {
+      "system": "CPT",
+      "code": "80048",
+      "description": "Basic metabolic panel (BMP)",
+      "confidence": 0.95,
+      "evidence_text": "Order basic metabolic panel (BMP) to recheck creatinine and eGFR in 3 months",
+      "confidence_reason": "Explicitly documented in plan",
+      "db_description": "Basic metabolic panel"
+    },
+    {
+      "system": "CPT",
+      "code": "99214",
+      "description": "Office or other outpatient visit for the evaluation and management of an established patient, which requires a medically appropriate history and/or examination and moderate level of medical decision making",
+      "confidence": 0.9,
+      "evidence_text": "[Established patient]",
+      "confidence_reason": "Established patient status documented in assessment",
+      "db_description": "Office/outpatient visit, est"
+    }
+  ],
+  "extracted_evidence": {
+    "diagnoses": [
+      {
+        "condition": "Chronic kidney disease, stage 3a \u2014 stable, monitoring renal function",
+        "acuity": "chronic",
+        "laterality": null,
+        "complications": [],
+        "stage": "3a",
+        "severity": null
+      },
+      {
+        "condition": "Benign prostatic hyperplasia with lower urinary tract symptoms (LUTS) \u2014 mildly progressed",
+        "acuity": null,
+        "laterality": null,
+        "complications": [],
+        "stage": null,
+        "severity": "mild"
+      }
+    ],
+    "procedures": [
+      {
+        "name": "Initiate tamsulosin 0.4mg daily at bedtime for worsening urinary symptoms",
+        "approach": "injection",
+        "site": null,
+        "laterality": null,
+        "urgency": null
+      },
+      {
+        "name": "Order basic metabolic panel (BMP) to recheck creatinine and eGFR in 3 months",
+        "approach": null,
+        "site": null,
+        "laterality": null,
+        "urgency": null
+      },
+      {
+        "name": "Follow-up in 3 months.",
+        "approach": null,
+        "site": null,
+        "laterality": null,
+        "urgency": null
+      }
+    ],
+    "symptoms": [
+      "hematuria",
+      "edema",
+      "dysuria",
+      "pain",
+      "nocturia",
+      "peripheral edema",
+      "frequency",
+      "urinary frequency"
+    ],
+    "findings": [
+      {
+        "type": "vital",
+        "name": "BP",
+        "value": "126/74"
+      },
+      {
+        "type": "vital",
+        "name": "HR",
+        "value": "72"
+      },
+      {
+        "type": "vital",
+        "name": "Temp",
+        "value": "98.2"
+      },
+      {
+        "type": "vital",
+        "name": "Weight",
+        "value": "195 lb"
+      }
+    ]
+  },
+  "validation_metadata": {
+    "total_codes": 7,
+    "flagged_count": 2,
+    "auto_corrected_count": 0,
+    "needs_review": true,
+    "validation_issues": [
+      {
+        "code": "N18.31",
+        "system": "ICD10",
+        "issue": "Valid format but not in database (confidence 0.95)"
+      }
+    ]
+  }
+}

@@ -62,11 +62,17 @@ def set_auth_cookies(response, access_token, refresh_token=None):
 
          
 def delete_auth_cookies(response):
-    """
-    Clears both auth cookies by setting their max_age to 0.
-    Called on logout.
-    """
     config = settings.JWT_AUTH
-    response.delete_cookie(config["AUTH_COOKIE"])
-    response.delete_cookie(config["AUTH_COOKIE_REFRESH"])
- 
+    
+    # must match the exact path used in set_cookie
+    response.delete_cookie(
+        key=config["AUTH_COOKIE"],
+        path="/",
+        samesite=config["AUTH_COOKIE_SAMESITE"],
+    )
+    
+    response.delete_cookie(
+        key=config["AUTH_COOKIE_REFRESH"],
+        path="/api/auth/refresh/",  # must match the path it was set with
+        samesite=config["AUTH_COOKIE_SAMESITE"],
+    )

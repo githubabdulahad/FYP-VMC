@@ -3,12 +3,20 @@ coding/code_retrieval.py
 
 Evidence-based code retrieval and ranking.
 Given clinical evidence (diagnoses, procedures), find candidate ICD-10 and CPT codes
-from the local CSV tables and rank by relevance.
+and rank by relevance.
+
+Primary source  : NLM Clinical Table Search Service API (free, no key required).
+Fallback source : Local CSV databases via the validator singleton.
 """
 
+import logging
 import re
 from typing import Any, Optional
+
+from coding import api_client
 from coding.validation import validator
+
+logger = logging.getLogger(__name__)
 
 
 class CodeRetriever:
@@ -68,42 +76,62 @@ class CodeRetriever:
         """
         Retrieve top ICD-10 candidates for a diagnosis.
 
+        Primary: NLM Clinical Table Search API.
+        Fallback: Local CSV token-overlap search.
+
         Args:
             diagnosis_text: Clinical description of diagnosis
             top_k: Return top N matches
-            min_score: Minimum relevance score to include
+            min_score: Minimum relevance score to include (only used in CSV fallback)
 
         Returns:
             [{
                 "code": "E11.9",
                 "description": "Type 2 diabetes...",
                 "score": 0.85,
-                "source": "clinical_evidence"
+                "source": "nlm_api" | "csv_fallback"
             }, ...]
         """
-        if not diagnosis_text or not validator.icd10_db:
+        if not diagnosis_text:
+            return []
+
+        # --- Primary: NLM API ---
+        api_results = api_client.search_icd10(diagnosis_text, top_k=top_k)
+        if api_results:
+            logger.debug(
+                "ICD retrieve via NLM API: %d results for '%s'",
+                len(api_results), diagnosis_text[:60],
+            )
+            return [
+                {
+                    "code": r["code"],
+                    "description": r["description"],
+                    "score": round(1.0 - (idx * 0.05), 3),  # rank-based pseudo-score
+                    "source": "nlm_api",
+                }
+                for idx, r in enumerate(api_results)
+            ]
+
+        # --- Fallback: CSV token search ---
+        logger.warning("NLM API unavailable for ICD retrieve — using CSV fallback")
+        validator._ensure_csv_loaded()
+        if not validator.icd10_db:
             return []
 
         evidence_tokens = CodeRetriever._tokenize_evidence(diagnosis_text)
         candidates = []
-
         for code, description in validator.icd10_db.items():
             code_tokens = validator.icd_tokens.get(code, set())
             score = CodeRetriever._calculate_relevance_score(
-                evidence_tokens,
-                code_tokens,
-                description,
+                evidence_tokens, code_tokens, description
             )
-
             if score >= min_score:
                 candidates.append({
                     "code": code,
                     "description": description,
                     "score": round(score, 3),
-                    "source": "clinical_evidence",
+                    "source": "csv_fallback",
                 })
-
-        # Sort by score descending
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
 
@@ -114,44 +142,64 @@ class CodeRetriever:
         min_score: float = 0.3,
     ) -> list[dict[str, Any]]:
         """
-        Retrieve top CPT candidates for a procedure.
+        Retrieve top CPT/HCPCS candidates for a procedure.
+
+        Primary: NLM Clinical Table Search API (HCPCS endpoint, covers CPT Level I).
+        Fallback: Local CSV token-overlap search.
 
         Args:
             procedure_text: Clinical description of procedure
             top_k: Return top N matches
-            min_score: Minimum relevance score to include
+            min_score: Minimum relevance score to include (only used in CSV fallback)
 
         Returns:
             [{
                 "code": "99213",
                 "description": "Office visit, established patient...",
                 "score": 0.82,
-                "source": "clinical_evidence"
+                "source": "nlm_api" | "csv_fallback"
             }, ...]
         """
-        if not procedure_text or not validator.cpt_db:
+        if not procedure_text:
+            return []
+
+        # --- Primary: NLM API ---
+        api_results = api_client.search_cpt(procedure_text, top_k=top_k)
+        if api_results:
+            logger.debug(
+                "CPT retrieve via NLM API: %d results for '%s'",
+                len(api_results), procedure_text[:60],
+            )
+            return [
+                {
+                    "code": r["code"],
+                    "description": r["description"],
+                    "score": round(1.0 - (idx * 0.05), 3),
+                    "source": "nlm_api",
+                }
+                for idx, r in enumerate(api_results)
+            ]
+
+        # --- Fallback: CSV token search ---
+        logger.warning("NLM API unavailable for CPT retrieve — using CSV fallback")
+        validator._ensure_csv_loaded()
+        if not validator.cpt_db:
             return []
 
         evidence_tokens = CodeRetriever._tokenize_evidence(procedure_text)
         candidates = []
-
         for code, description in validator.cpt_db.items():
             code_tokens = validator.cpt_tokens.get(code, set())
             score = CodeRetriever._calculate_relevance_score(
-                evidence_tokens,
-                code_tokens,
-                description,
+                evidence_tokens, code_tokens, description
             )
-
             if score >= min_score:
                 candidates.append({
                     "code": code,
                     "description": description,
                     "score": round(score, 3),
-                    "source": "clinical_evidence",
+                    "source": "csv_fallback",
                 })
-
-        # Sort by score descending
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:top_k]
 
@@ -163,29 +211,40 @@ class CodeRetriever:
     ) -> float:
         """
         Score how well an LLM-generated code matches the clinical evidence.
-        
+
+        Looks up the code description via NLM API first; falls back to CSV.
         Returns: 0.0 - 1.0 score
         """
+        # --- Resolve description: API first ---
+        description = ""
         if code_system == "ICD10":
-            db = validator.icd10_db
-            tokens_map = validator.icd_tokens
+            found, desc = api_client.lookup_icd10(code)
+            if found and desc:
+                description = desc
+            else:
+                # Fallback to CSV
+                validator._ensure_csv_loaded()
+                code_upper = code.replace(".", "").upper()
+                description = validator.icd10_db.get(code_upper, "")
         elif code_system == "CPT":
-            db = validator.cpt_db
-            tokens_map = validator.cpt_tokens
+            found, desc = api_client.lookup_cpt(code)
+            if found and desc:
+                description = desc
+            else:
+                validator._ensure_csv_loaded()
+                description = validator.cpt_db.get(code.upper(), "")
         else:
             return 0.0
 
-        code_upper = code.replace(".", "").upper()
-        description = db.get(code_upper, "")
         if not description:
             return 0.0
 
-        code_tokens = tokens_map.get(code_upper, set())
+        code_tokens = CodeRetriever._tokenize_evidence(description)
         evidence_tokens = CodeRetriever._tokenize_evidence(evidence_text)
 
         return CodeRetriever._calculate_relevance_score(
-            evidence_tokens,
-            code_tokens,
+            list(evidence_tokens),
+            set(code_tokens),
             description,
         )
 

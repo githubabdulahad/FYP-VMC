@@ -1,7 +1,9 @@
 import jwt
 from django.conf import settings
 from django.contrib.auth import get_user_model
+# pyrefly: ignore [missing-import]
 from drf_yasg import openapi
+# pyrefly: ignore [missing-import]
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -9,9 +11,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from VirtualMedicalCoder.swagger import AUTH_COOKIE_DESC, BAD_REQUEST, UNAUTHORIZED
-from .serializers import RegisterSerializer
+from .serializers import RegisterSerializer, LoginSerializer, UserSerializer, ProfileUpdateSerializer
+# pyrefly: ignore [missing-import]
 from .authentication import JWTCookieAuthentication
-from .serializers import LoginSerializer, UserSerializer
+# pyrefly: ignore [missing-import]
 from .tokens import (
     delete_auth_cookies,
     generate_access_token,
@@ -209,24 +212,83 @@ class TokenRefreshView(APIView):
  
 class MeView(APIView):
     """
-    GET /api/auth/me/
- 
-    Example of a protected endpoint.
-    JWTCookieAuthentication reads the cookie and populates request.user.
-    IsAuthenticated rejects the request if authentication failed.
+    GET  /api/auth/me/  — Return the logged-in user's profile.
+    PATCH /api/auth/me/ — Update profile fields (name, email, password).
+
+    JWTCookieAuthentication reads the access_token cookie and populates
+    request.user.  All fields in PATCH are optional — send only what changed.
     """
- 
+
     authentication_classes = [JWTCookieAuthentication]
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_summary="Get current authenticated user",
+        operation_summary="Get current authenticated user's profile",
+        operation_description="Returns the logged-in user's id, username, email, name, role, and staff status.",
         responses={200: openapi.Response("User profile"), 401: UNAUTHORIZED},
-        tags=["Authentication"],
+        tags=["Profile"],
     )
     def get(self, request):
         return Response(
             {"user": UserSerializer(request.user).data},
+            status=status.HTTP_200_OK,
+        )
+
+    @swagger_auto_schema(
+        operation_summary="Update current user's profile",
+        operation_description=(
+            "Partially update first_name, last_name, and/or email.\n\n"
+            "To change password, supply `current_password`, `new_password`, "
+            "and `confirm_new_password` together."
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                "first_name":          openapi.Schema(type=openapi.TYPE_STRING),
+                "last_name":           openapi.Schema(type=openapi.TYPE_STRING),
+                "email":               openapi.Schema(type=openapi.TYPE_STRING, format="email"),
+                "current_password":    openapi.Schema(type=openapi.TYPE_STRING, format="password"),
+                "new_password":        openapi.Schema(type=openapi.TYPE_STRING, format="password"),
+                "confirm_new_password": openapi.Schema(type=openapi.TYPE_STRING, format="password"),
+            },
+        ),
+        responses={
+            200: openapi.Response("Updated user profile"),
+            400: BAD_REQUEST,
+            401: UNAUTHORIZED,
+        },
+        tags=["Profile"],
+    )
+    def patch(self, request):
+        serializer = ProfileUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        user = request.user
+
+        # Apply simple field updates
+        if "first_name" in data:
+            user.first_name = data["first_name"]
+        if "last_name" in data:
+            user.last_name = data["last_name"]
+        if "email" in data:
+            user.email = data["email"]
+
+        # Apply password change if requested
+        if data.get("new_password"):
+            user.set_password(data["new_password"])
+
+        user.save()
+
+        return Response(
+            {
+                "message": "Profile updated successfully.",
+                "user": UserSerializer(user).data,
+            },
             status=status.HTTP_200_OK,
         )
  

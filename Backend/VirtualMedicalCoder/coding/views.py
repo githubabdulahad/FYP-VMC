@@ -330,3 +330,194 @@ class DeleteCodeView(APIView):
         result.save()
         serializer = CodingResultSerializer(result)
         return Response(serializer.data)
+
+
+class AddCodeView(APIView):
+    """
+    POST /api/coding/<result_id>/add-code/
+
+    Allows a coder to manually add a single ICD-10 or CPT code to a
+    coding result after the AI output was rejected or found incomplete.
+
+    Body:
+    {
+        "type": "icd" | "cpt",
+        "code": "E11.9",
+        "description": "Type 2 diabetes mellitus without complications",
+        "evidence_text": "Patient has documented Type 2 Diabetes"    (optional)
+    }
+    """
+
+    authentication_classes = [JWTCookieAuthentication]
+    permission_classes     = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Manually add a single ICD-10 or CPT code to a result",
+        operation_description=(
+            "Used when the AI missed a code or a code was rejected and "
+            "the coder wants to add a specific code themselves.\n\n"
+            "The new code is appended to the existing list without touching other codes."
+        ),
+        manual_parameters=[
+            openapi.Parameter("result_id", openapi.IN_PATH, type=openapi.TYPE_INTEGER, required=True),
+        ],
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["type", "code", "description"],
+            properties={
+                "type":         openapi.Schema(type=openapi.TYPE_STRING, enum=["icd", "cpt"],
+                                               description="Code system: 'icd' for ICD-10, 'cpt' for CPT"),
+                "code":         openapi.Schema(type=openapi.TYPE_STRING, description="The code value, e.g. E11.9"),
+                "description":  openapi.Schema(type=openapi.TYPE_STRING, description="Human-readable description"),
+                "evidence_text": openapi.Schema(type=openapi.TYPE_STRING, description="Clinical evidence for this code"),
+            },
+        ),
+        responses={
+            200: openapi.Response("Updated coding result with new code"),
+            400: BAD_REQUEST,
+            401: UNAUTHORIZED,
+            404: NOT_FOUND,
+        },
+        tags=["Coding"],
+    )
+    def post(self, request, result_id):
+        try:
+            result = CodingResult.objects.get(id=result_id, user=request.user)
+        except CodingResult.DoesNotExist:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        code_type    = request.data.get("type", "").lower()
+        code_value   = request.data.get("code", "").strip()
+        description  = request.data.get("description", "").strip()
+        evidence_text = request.data.get("evidence_text", "").strip()
+
+        if not code_type or not code_value or not description:
+            return Response(
+                {"error": "'type', 'code', and 'description' are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if code_type not in ["icd", "cpt"]:
+            return Response(
+                {"error": "'type' must be 'icd' or 'cpt'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_code_entry = {
+            "code":          code_value,
+            "description":   description,
+            "confidence":    1.0,           # manually added → highest confidence
+            "evidence_text": evidence_text,
+            "flagged":       False,
+            "manually_added": True,         # audit trail: added by a human
+        }
+
+        if code_type == "icd":
+            # Prevent duplicates
+            existing_codes = [c.get("code") for c in result.icd_codes]
+            if code_value in existing_codes:
+                return Response(
+                    {"error": f"ICD code '{code_value}' already exists in this result."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            result.icd_codes = result.icd_codes + [new_code_entry]
+        else:
+            existing_codes = [c.get("code") for c in result.cpt_codes]
+            if code_value in existing_codes:
+                return Response(
+                    {"error": f"CPT code '{code_value}' already exists in this result."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            result.cpt_codes = result.cpt_codes + [new_code_entry]
+
+        # Log the manual addition as a ReviewFeedback entry
+        ReviewFeedback.objects.create(
+            coding_result=result,
+            reviewer=request.user,
+            llm_codes=[],                   # AI didn't produce this code
+            corrected_codes=[new_code_entry],
+            feedback_type="missing_code",
+            explanation=f"Manually added {code_type.upper()} code {code_value}: {description}",
+        )
+
+        result.save()
+        return Response(
+            {
+                "message": f"{code_type.upper()} code '{code_value}' added successfully.",
+                "result": CodingResultSerializer(result).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CodingStatsView(APIView):
+    """
+    GET /api/coding/stats/
+
+    Returns aggregate statistics for the logged-in user's coding results.
+    Useful for powering a dashboard.
+
+    Returns:
+    {
+        "total":    10,
+        "pending":  3,
+        "approved": 5,
+        "rejected": 1,
+        "revised":  1,
+        "avg_confidence": 0.87
+    }
+    """
+
+    authentication_classes = [JWTCookieAuthentication]
+    permission_classes     = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Get coding statistics for the current user",
+        operation_description=(
+            "Returns a summary count of coding results by review status "
+            "and the average AI confidence score. Ideal for a dashboard widget."
+        ),
+        responses={
+            200: openapi.Response(
+                description="Coding statistics",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "total":          openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "pending":        openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "approved":       openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "rejected":       openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "revised":        openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "avg_confidence": openapi.Schema(type=openapi.TYPE_NUMBER),
+                    },
+                ),
+            ),
+            401: UNAUTHORIZED,
+        },
+        tags=["Coding"],
+    )
+    def get(self, request):
+        from django.db.models import Avg, Count, Q
+
+        qs = CodingResult.objects.filter(user=request.user)
+
+        agg = qs.aggregate(
+            total=Count("id"),
+            pending=Count("id",  filter=Q(review_status=CodingResult.ReviewStatus.PENDING)),
+            approved=Count("id", filter=Q(review_status=CodingResult.ReviewStatus.APPROVED)),
+            rejected=Count("id", filter=Q(review_status=CodingResult.ReviewStatus.REJECTED)),
+            revised=Count("id",  filter=Q(review_status=CodingResult.ReviewStatus.REVISED)),
+            avg_confidence=Avg("confidence"),
+        )
+
+        return Response(
+            {
+                "total":          agg["total"],
+                "pending":        agg["pending"],
+                "approved":       agg["approved"],
+                "rejected":       agg["rejected"],
+                "revised":        agg["revised"],
+                "avg_confidence": round(agg["avg_confidence"] or 0.0, 4),
+            },
+            status=status.HTTP_200_OK,
+        )

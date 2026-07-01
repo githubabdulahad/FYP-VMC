@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model , authenticate
+from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 
@@ -91,3 +91,52 @@ class UserSerializer(serializers.Serializer):
     last_name = serializers.CharField()
     is_staff = serializers.BooleanField()
     role = serializers.CharField()
+
+
+class ProfileUpdateSerializer(serializers.Serializer):
+    """
+    Validates a PATCH /api/auth/me/ request.
+    All fields are optional — only provided fields are updated.
+    """
+
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name  = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    email      = serializers.EmailField(required=False)
+
+    # Password change — both required together if either is supplied
+    current_password = serializers.CharField(write_only=True, required=False, style={"input_type": "password"})
+    new_password     = serializers.CharField(write_only=True, required=False, style={"input_type": "password"})
+    confirm_new_password = serializers.CharField(write_only=True, required=False, style={"input_type": "password"})
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+        user = self.context["request"].user
+        if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return email
+
+    def validate(self, attrs):
+        current  = attrs.get("current_password")
+        new_pw   = attrs.get("new_password")
+        confirm  = attrs.get("confirm_new_password")
+
+        # If any password field is supplied, all three must be present
+        if any([current, new_pw, confirm]):
+            if not all([current, new_pw, confirm]):
+                raise serializers.ValidationError(
+                    "Provide current_password, new_password, and confirm_new_password together."
+                )
+            # Verify current password
+            user = self.context["request"].user
+            if not user.check_password(current):
+                raise serializers.ValidationError({"current_password": "Current password is incorrect."})
+            # New passwords must match
+            if new_pw != confirm:
+                raise serializers.ValidationError({"confirm_new_password": "New passwords do not match."})
+            # Validate strength
+            try:
+                validate_password(new_pw, user=user)
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError({"new_password": list(exc.messages)})
+
+        return attrs

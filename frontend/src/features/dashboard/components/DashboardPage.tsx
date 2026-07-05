@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getCodingResults } from "../api/dashboardApi";
+import { getCodingResults, getCodingStats } from "../api/dashboardApi";
 import type {DashboardStats } from "../../../types/document";
 import DocumentTable from "../../../components/ui/DocumentTable";
 
@@ -35,12 +35,17 @@ function DashboardPage() {
     queryFn: getCodingResults,
   });
 
-  // compute stats from the list directly, no separate endpoint needed
+  const { data: statsData } = useQuery({
+    queryKey: ["codingStats"],
+    queryFn: getCodingStats,
+  });
+
+  // Prefer the backend aggregate endpoint; fall back to the current list if needed.
   const stats: DashboardStats = {
-    total: results.length,
-    processing: 0, // processing docs don't appear in /coding/ yet
-    ready_for_review: results.filter((r) => r.review_status === "pending").length,
-    approved: results.filter((r) => r.review_status === "approved" || r.review_status === "revised").length,
+    total: statsData?.total ?? results.length,
+    processing: 0,
+    ready_for_review: statsData?.pending ?? results.filter((r) => r.review_status === "pending").length,
+    approved: statsData?.approved ?? results.filter((r) => r.review_status === "approved" || r.review_status === "revised").length,
   };
 
   // latest 5 only for dashboard

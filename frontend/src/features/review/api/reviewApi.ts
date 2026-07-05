@@ -65,3 +65,33 @@ export async function getReportData(id: number) {
   const response = await axios.get(`/reports/${id}/`);
   return response.data;
 }
+
+export async function getCodingStats(): Promise<{
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  revised: number;
+  avg_confidence: number;
+}> {
+  const response = await axios.get("/coding/stats/");
+  return response.data;
+}
+
+export async function getReviewFeedbackHistory(id: number) {
+  const response = await axios.get(`/coding/${id}/feedback/`);
+  return response.data;
+}
+
+export async function addCodeToResult(
+  id: number,
+  payload: {
+    type: "icd" | "cpt";
+    code: string;
+    description: string;
+    evidence_text?: string;
+  }
+) {
+  const response = await axios.post(`/coding/${id}/add-code/`, payload);
+  return response.data;
+}

@@ -15,7 +15,7 @@ export const generatePDF = (reportData: any, filename: string) => {
     isHeading: boolean = false
   ) => {
     doc.setFontSize(fontSize);
-    doc.setFont(undefined, isBold ? "bold" : "normal");
+    doc.setFont("helvetica", isBold ? "bold" : "normal");
     const lines = doc.splitTextToSize(text, contentWidth);
 
     if (yPos + lines.length * 5 > pageHeight - margin) {

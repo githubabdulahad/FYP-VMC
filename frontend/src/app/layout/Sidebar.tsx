@@ -62,6 +62,16 @@ function Sidebar() {
         </svg>
       ),
     },
+    {
+      label: "Profile",
+      path: "/profile",
+      icon: (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M5.121 17.804A9 9 0 1118.88 17.804M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      ),
+    },
   ];
 
   const handleLogout = async () => {
@@ -127,7 +137,10 @@ function Sidebar() {
 
       {/* User + Logout */}
       <div className="mt-auto border-t border-slate-200 pt-4">
-        <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50 cursor-default">
+        <div
+          className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+          onClick={() => navigate("/profile")}
+        >
           <div className="w-7 h-7 rounded-full bg-teal-600 flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0">
             {initials}
           </div>

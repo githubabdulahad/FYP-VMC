@@ -367,15 +367,74 @@ class DatabaseCodingValidator:
 
         return True, None
 
+    def _combined_note_text(self, llm_output: dict[str, Any]) -> str:
+        soap = llm_output.get("soap") or llm_output.get("soap_note") or {}
+        parts: list[str] = []
+        for key in ("subjective", "objective", "assessment", "plan"):
+            value = soap.get(key)
+            if value:
+                parts.append(str(value))
+        return " \n ".join(parts)
+
+    def _history_only_context(self, text: str) -> bool:
+        text_lower = (text or "").lower()
+        history_markers = ["history of", "previous", "prior", "past", "reviewed history", "old injury"]
+        current_markers = ["today", "currently", "active", "treating", "managed", "exam", "worsening", "acute"]
+        return any(marker in text_lower for marker in history_markers) and not any(
+            marker in text_lower for marker in current_markers
+        )
+
+    def _best_replacement(self, system: str, evidence_text: str, current_code: str) -> dict[str, Any] | None:
+        from coding.code_retrieval import CodeRetriever
+
+        current_prefix = current_code[:1].upper()
+
+        if system == "ICD10":
+            candidates = CodeRetriever.retrieve_icd_candidates(evidence_text, top_k=5)
+        elif system == "CPT":
+            candidates = CodeRetriever.retrieve_cpt_candidates(evidence_text, top_k=5)
+        else:
+            return None
+
+        current_score = CodeRetriever.score_llm_code_against_evidence(system, current_code, evidence_text)
+        best_candidate: dict[str, Any] | None = None
+        best_score = current_score
+
+        for candidate in candidates:
+            candidate_code = str(candidate.get("code", "")).strip()
+            if not candidate_code:
+                continue
+
+            if candidate_code.replace(".", "").upper() == current_code.replace(".", "").upper():
+                continue
+
+            if system == "ICD10" and current_prefix in {"S", "V", "W", "X", "Y"}:
+                if not candidate_code.upper().startswith(current_prefix):
+                    continue
+
+            candidate_score = CodeRetriever.score_llm_code_against_evidence(system, candidate_code, evidence_text)
+            if candidate_score > best_score:
+                best_candidate = candidate.copy()
+                best_candidate["evidence_score"] = candidate_score
+                best_score = candidate_score
+
+        if best_candidate and best_score >= max(current_score + 0.10, 0.35):
+            return best_candidate
+
+        return None
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
     def validate_and_filter(self, llm_output: dict[str, Any]) -> dict[str, Any]:
         """Keep only ICD/CPT codes and attach validation results."""
+        from coding.code_retrieval import CodeRetriever
+
         validated_codes: list[dict[str, Any]] = []
         validation_report: list[dict[str, Any]] = []
         needs_human_review = False
+        combined_note_text = self._combined_note_text(llm_output)
 
         for item in llm_output.get("codes", []):
             if not isinstance(item, dict):
@@ -390,9 +449,65 @@ class DatabaseCodingValidator:
             normalized_item = item.copy()
             normalized_item["system"] = system
             normalized_item["code"] = code
+            evidence_text = str(normalized_item.get("evidence_text") or "").strip() or combined_note_text
 
             if db_desc:
                 normalized_item["db_description"] = db_desc
+
+            semantic_valid = True
+            semantic_reason = ""
+            if is_valid and system in {"ICD10", "CPT"}:
+                semantic_valid, semantic_reason = CodeRetriever._semantic_validation(
+                    normalized_item,
+                    db_desc or normalized_item.get("description", ""),
+                )
+
+            if is_valid and not semantic_valid:
+                reason = semantic_reason or reason
+
+                if system == "ICD10" and evidence_text and not self._history_only_context(evidence_text):
+                    replacement = self._best_replacement(system, evidence_text, code)
+                    if replacement:
+                        replacement_code = str(replacement.get("code", "")).strip()
+                        replacement_valid, _, replacement_db_desc = self.validate_code(system, replacement_code)
+                        if replacement_valid:
+                            normalized_item["original_code"] = code
+                            normalized_item["code"] = replacement_code
+                            normalized_item["auto_corrected"] = True
+                            normalized_item["confidence_reason"] = (
+                                f"Auto-corrected from {code} to {replacement_code} after semantic mismatch. "
+                                f"{normalized_item.get('confidence_reason', '')}"
+                            )
+                            normalized_item["confidence"] = min(
+                                float(normalized_item.get("confidence", 0.6)),
+                                float(replacement.get("evidence_score", 0.75)),
+                            )
+                            if replacement_db_desc:
+                                normalized_item["db_description"] = replacement_db_desc
+                            needs_human_review = True
+                            validated_codes.append(normalized_item)
+                            validation_report.append(
+                                {
+                                    "system": system,
+                                    "code": replacement_code,
+                                    "action": "auto_correct",
+                                    "issues": [semantic_reason or "semantic mismatch"],
+                                }
+                            )
+                            continue
+
+                needs_human_review = True
+                normalized_item["needs_review"] = True
+                normalized_item["review_reason"] = reason or "semantic mismatch"
+                validation_report.append(
+                    {
+                        "system": system,
+                        "code": code,
+                        "action": "reject",
+                        "issues": [reason or "semantic mismatch"],
+                    }
+                )
+                continue
 
             # Additional Z-code validation
             if is_valid and system == "ICD10" and code.upper().startswith("Z"):
@@ -420,9 +535,10 @@ class DatabaseCodingValidator:
         result["codes"] = validated_codes
         result["validation_report"] = validation_report
         result["needs_human_review"] = needs_human_review
+        flagged_for_review = len(validation_report)
         result["validation_summary"] = {
             "total_codes": len(validated_codes),
-            "flagged_for_review": sum(1 for c in validated_codes if c.get("needs_review")),
+            "flagged_for_review": flagged_for_review,
             "clean": sum(1 for c in validated_codes if not c.get("needs_review")),
         }
         return result

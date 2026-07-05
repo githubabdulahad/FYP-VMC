@@ -11,6 +11,7 @@ import UploadPage from "./features/upload/components/UploadPage";
 import ReviewQueuePage from "./features/review/components/ReviewQueuePage";
 import ReviewPage from "./features/review/components/ReviewPage";
 import AllRecordsPage from "./features/records/components/AllRecordsPage";
+import ProfilePage from "./features/auth/components/ProfilePage";
 
 function App() {
 const { setUser, clearUser } = useAuthStore();
@@ -54,6 +55,7 @@ const { setUser, clearUser } = useAuthStore();
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/review-queue" element={<ReviewQueuePage />} />
         <Route path="/records" element={<AllRecordsPage/>} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/review/:id" element={<ReviewPage/>} />
       </Route>
 

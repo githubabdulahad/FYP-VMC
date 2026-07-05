@@ -9,15 +9,27 @@ import {
   deleteCode,
   getReportData,
   getAlternativeCodeSuggestions,
+  getReviewFeedbackHistory,
+  addCodeToResult,
 } from "../api/reviewApi";
 import { generatePDF } from "../utils/pdfGenerator";
 import StatusBadge from "../../../components/ui/Statusbadge";
 import SOAPNoteSection from "./sections/SOAPNoteSection";
 import CodeTableSection from "./sections/CodeTableSection";
 import ActionButtonsSection from "./sections/ActionButtonsSection";
-import ReviewSuccess from "./Reviewsuccess";
+import ReviewSuccess from "./ReviewSuccess";
 import ReviewLoading from "./ReviewLoading";
 import SuggestionsModal from "./modals/SuggestionsModal";
+
+interface ReviewFeedbackEntry {
+  id: number;
+  reviewer_username: string;
+  llm_codes: unknown[];
+  corrected_codes: unknown[];
+  feedback_type: string;
+  explanation: string;
+  created_at: string;
+}
 
 export default function ReviewDetail() {
   const queryClient = useQueryClient();
@@ -36,6 +48,12 @@ export default function ReviewDetail() {
     queryFn: getCodingResults,
   });
 
+  const { data: feedbackHistory = [] } = useQuery<ReviewFeedbackEntry[]>({
+    queryKey: ["reviewFeedback", codingId],
+    queryFn: () => getReviewFeedbackHistory(codingId),
+    enabled: codingId > 0,
+  });
+
   // State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successData, setSuccessData] = useState<{
@@ -50,6 +68,11 @@ export default function ReviewDetail() {
     suggestions: Array<{ code: string; description: string; score: number }>;
     isLoading: boolean;
   } | null>(null);
+  const [manualCodeType, setManualCodeType] = useState<"icd" | "cpt">("icd");
+  const [manualCode, setManualCode] = useState("");
+  const [manualDescription, setManualDescription] = useState("");
+  const [manualEvidenceText, setManualEvidenceText] = useState("");
+  const [manualCodeMessage, setManualCodeMessage] = useState<string | null>(null);
 
   // Handlers
   const handleDeleteCode = async (code: string) => {
@@ -114,6 +137,37 @@ export default function ReviewDetail() {
       generatePDF(reportData, `${currentDoc.file_name}-report.pdf`);
     } catch (err) {
       setErrorMsg("Failed to download PDF. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddManualCode = async () => {
+    if (!manualCode.trim() || !manualDescription.trim()) {
+      setErrorMsg("Code and description are required to add a manual code.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    setManualCodeMessage(null);
+
+    try {
+      const response = await addCodeToResult(codingId, {
+        type: manualCodeType,
+        code: manualCode.trim(),
+        description: manualDescription.trim(),
+        evidence_text: manualEvidenceText.trim(),
+      });
+
+      setManualCodeMessage(response.message || "Code added successfully.");
+      setManualCode("");
+      setManualDescription("");
+      setManualEvidenceText("");
+      await queryClient.invalidateQueries({ queryKey: ["codingDetail", codingId] });
+      await queryClient.invalidateQueries({ queryKey: ["reviewFeedback", codingId] });
+    } catch (err) {
+      setErrorMsg("Failed to add code. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -236,6 +290,98 @@ export default function ReviewDetail() {
         onReject={() => handleSubmitReview("rejected")}
         onDownloadPDF={handleDownloadPDF}
       />
+
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Manual Code Add</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            Wire to the backend add-code endpoint when the AI misses a code.
+          </p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-2 block">
+            <span className="block text-xs font-medium text-slate-700">Code type</span>
+            <select
+              value={manualCodeType}
+              onChange={(e) => setManualCodeType(e.target.value as "icd" | "cpt")}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              <option value="icd">ICD-10</option>
+              <option value="cpt">CPT</option>
+            </select>
+          </label>
+          <label className="space-y-2 block">
+            <span className="block text-xs font-medium text-slate-700">Code</span>
+            <input
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              placeholder="E11.9"
+            />
+          </label>
+        </div>
+
+        <label className="space-y-2 block">
+          <span className="block text-xs font-medium text-slate-700">Description</span>
+          <input
+            value={manualDescription}
+            onChange={(e) => setManualDescription(e.target.value)}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            placeholder="Type 2 diabetes mellitus without complications"
+          />
+        </label>
+
+        <label className="space-y-2 block">
+          <span className="block text-xs font-medium text-slate-700">Evidence text</span>
+          <textarea
+            value={manualEvidenceText}
+            onChange={(e) => setManualEvidenceText(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm resize-none"
+            placeholder="Optional supporting evidence from the chart"
+          />
+        </label>
+
+        {manualCodeMessage && (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {manualCodeMessage}
+          </div>
+        )}
+
+        <button
+          onClick={handleAddManualCode}
+          disabled={isSubmitting}
+          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          {isSubmitting ? "Saving..." : "Add code"}
+        </button>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Review Feedback History</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            History from the backend review-feedback endpoint.
+          </p>
+        </div>
+
+        {feedbackHistory.length === 0 ? (
+          <p className="text-sm text-slate-500">No feedback history yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {feedbackHistory.map((entry: ReviewFeedbackEntry) => (
+              <div key={entry.id} className="rounded-lg border border-slate-200 p-4 text-sm">
+                <div className="flex flex-wrap gap-2 items-center justify-between">
+                  <p className="font-medium text-slate-900">{entry.feedback_type}</p>
+                  <p className="text-xs text-slate-500">{entry.reviewer_username} · {entry.created_at}</p>
+                </div>
+                <p className="mt-2 text-slate-600">{entry.explanation || "No explanation provided."}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Modal */}
       {suggestionsModal && (

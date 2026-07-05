@@ -1,6 +1,11 @@
 import api from "../../../lib/axios";
 import type { CodingResult, UploadStatus } from "../../../types/document";
 
+export const getCodingStats = async () => {
+  const response = await api.get("/coding/stats/");
+  return response.data;
+}
+
 // list of all coding results for logged-in user
 export const getCodingResults = async (): Promise<CodingResult[]> => {
   const response = await api.get("/coding/");

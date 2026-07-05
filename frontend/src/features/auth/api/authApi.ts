@@ -29,3 +29,15 @@ export const getMe = async (): Promise<User> => {
   const response = await api.get("/auth/me/");
   return response.data.user; // backend returns { user: {...} }
 };
+
+export const updateMyProfile = async (payload: {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  current_password?: string;
+  new_password?: string;
+  confirm_new_password?: string;
+}): Promise<User> => {
+  const response = await api.patch("/auth/me/", payload);
+  return response.data.user;
+};

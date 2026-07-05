@@ -260,31 +260,43 @@ class CodeRetriever:
         code_val = code.get("code", "")
         evidence_text = code.get("evidence_text", "").lower()
         system = code.get("system", "")
+        description_lower = (description or "").lower()
+
+        history_markers = ["history of", "previous", "prior", "past", "old injury", "reviewed history"]
+        current_markers = ["today", "currently", "active", "treating", "managed", "exam", "worsening", "acute"]
+        wound_markers = ["laceration", "cut", "cuts", "wound", "open wound", "tear", "bleeding", "puncture", "abrasion"]
+        injury_only_markers = ["swelling", "pain", "painful", "bruise", "bruising", "contusion", "edema"]
+        repair_markers = ["repair", "repaired", "sutured", "suture", "staple", "closure", "closed"]
+        wound_care_only_markers = ["clean and dress", "dressed", "dressing", "wound care", "cleaned"]
+
+        def _has_any(text: str, markers: list[str]) -> bool:
+            return any(marker in text for marker in markers)
 
         # Check S80 vs S81 (injury vs open wound)
         if code_val.startswith("S8") and description and system == "ICD10":
             # S81.xxx = open wound (laceration/puncture)
             # S80.xxx = contusion/injury (swelling, bruising, pain)
             is_open_wound = "81" in code_val
-            has_open_wound_evidence = any(
-                word in evidence_text for word in 
-                ["laceration", "cut", "tear", "bleeding", "puncture", "wound"]
-            )
-            has_injury_evidence = any(
-                word in evidence_text for word in 
-                ["swelling", "pain", "bruise", "contusion", "edema"]
-            )
+            has_open_wound_evidence = _has_any(evidence_text, wound_markers)
+            has_injury_evidence = _has_any(evidence_text, injury_only_markers)
 
             # If code is S81 (open wound) but evidence only mentions swelling/pain
             if is_open_wound and has_injury_evidence and not has_open_wound_evidence:
                 return False, f"Code {code_val} is open wound (S81) but evidence '{evidence_text}' describes injury/swelling (should be S80)"
 
+        # Historical injury codes should not be used when the note is history-only
+        if system == "ICD10" and code_val.endswith("D"):
+            has_history_language = _has_any(evidence_text, history_markers)
+            has_current_language = _has_any(evidence_text, current_markers)
+            if has_history_language and not has_current_language:
+                return False, (
+                    f"Code {code_val} uses 'D' (subsequent encounter) but evidence '{evidence_text}' "
+                    "is historical only and not actively treated today"
+                )
+
         # Check 7th character A vs D for historical injuries
         if code_val.endswith("A") and system == "ICD10":
-            has_historical_keywords = any(
-                word in evidence_text for word in 
-                ["history", "previous", "prior", "past", "old", "from June", "from November", "from May"]
-            )
+            has_historical_keywords = _has_any(evidence_text, history_markers)
             if has_historical_keywords:
                 return False, f"Code {code_val} uses 'A' (initial) but evidence '{evidence_text}' indicates historical/previous injury (should use 'D' for subsequent)"
 
@@ -295,6 +307,15 @@ class CodeRetriever:
             # V23.4 specifically = truck/van. If evidence says "car", should be V23.9
             if has_car_evidence and not has_truck_van_evidence:
                 return False, f"Code {code_val} is motorcycle-truck/van collision but evidence '{evidence_text}' says car (should be V23.9XXA)"
+
+        # Check V23.9XXA when vehicle type is actually documented
+        if code_val.startswith("V23.9"):
+            has_specific_vehicle = any(word in evidence_text for word in ["car", "truck", "van", "pickup"])
+            if has_specific_vehicle:
+                return False, (
+                    f"Code {code_val} is unspecified vehicle collision but evidence '{evidence_text}' "
+                    "names a specific vehicle type"
+                )
 
         # Check Y92 place codes (Y92.830 park vs Y92.410 street)
         if code_val.startswith("Y92"):
@@ -313,8 +334,15 @@ class CodeRetriever:
 
         # Check CPT wound codes - size dependent
         if system == "CPT" and code_val in ["12001", "12002", "12004"]:
-            has_size_info = any(word in evidence_text for word in 
-                ["cm", "centimeter", "2.5", "7.5", "small", "large", "size"])
+            has_size_info = any(word in evidence_text for word in ["cm", "centimeter", "2.5", "7.5", "small", "large", "size"])
+            has_repair_language = _has_any(evidence_text, repair_markers)
+            has_wound_care_only = _has_any(evidence_text, wound_care_only_markers)
+
+            if has_wound_care_only and not has_repair_language:
+                return False, (
+                    f"Code {code_val} is wound repair but evidence '{evidence_text}' documents wound care only, not repair/closure"
+                )
+
             if not has_size_info:
                 # Don't fail, but reduce confidence
                 code["confidence"] = min(code.get("confidence", 0.7), 0.60)

@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from organizations.models import Organization
 
 User = get_user_model()
 
@@ -78,12 +79,21 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         return user
     
+class OrganizationBriefSerializer(serializers.Serializer):
+    """Minimal org info embedded in the user payload — enough for the
+    frontend to gate admin-only screens without a separate API call."""
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    review_mode = serializers.CharField()
+
+
 class UserSerializer(serializers.Serializer):
     """
     Represents the logged-in user in the login response body.
     Never expose sensitive fields like password here.
     """
- 
+
     id = serializers.IntegerField()
     username = serializers.CharField()
     email = serializers.EmailField()
@@ -91,7 +101,8 @@ class UserSerializer(serializers.Serializer):
     last_name = serializers.CharField()
     is_staff = serializers.BooleanField()
     role = serializers.CharField()
-
+    organization = OrganizationBriefSerializer(allow_null=True)
+    can_review_partner_submissions = serializers.BooleanField()
 
 class ProfileUpdateSerializer(serializers.Serializer):
     """

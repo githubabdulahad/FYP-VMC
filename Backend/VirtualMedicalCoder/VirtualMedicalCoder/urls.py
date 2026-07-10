@@ -39,15 +39,15 @@ schema_view = get_schema_view(
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path("api/auth/", include("accounts.urls")),
-    path('api/ingestion/', include("ingestion.urls")),
-    path('api/coding/', include("coding.urls")),
-    path('api/reports/', include("reports.urls")),
-    path('api/nlp/', include("nlp_engine.urls")),
+    path("api/v1/auth/", include("accounts.urls")),
+    path('api/v1/ingestion/', include("ingestion.urls")),
+    path('api/v1/coding/', include("coding.urls")),
+    path('api/v1/reports/', include("reports.urls")),
+    path('api/v1/nlp/', include("nlp_engine.urls")),
+    path('api/v1/organizations/', include("organizations.urls")),
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]
-
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

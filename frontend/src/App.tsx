@@ -12,29 +12,31 @@ import ReviewQueuePage from "./features/review/components/ReviewQueuePage";
 import ReviewPage from "./features/review/components/ReviewPage";
 import AllRecordsPage from "./features/records/components/AllRecordsPage";
 import ProfilePage from "./features/auth/components/ProfilePage";
+import AdminRoute from "./app/layout/AdminRoute";
+import ApiKeysPage from "./features/organizations/components/ApiKeysPage";
 
 function App() {
-const { setUser, clearUser } = useAuthStore();
+  const { setUser, clearUser } = useAuthStore();
 
   useEffect(() => {
     getMe()
       .then((user) => setUser(user))
       .catch(() => clearUser());
-      // runs when browser restores page from bfcache (back button)
-  const handlePageShow = (e: PageTransitionEvent) => {
-    if (e.persisted) {
-      getMe()
-        .then((user) => setUser(user))
-        .catch(() => {
-          clearUser();
-          window.location.href = "/login";
-        });
-    }
-  };
+    // runs when browser restores page from bfcache (back button)
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        getMe()
+          .then((user) => setUser(user))
+          .catch(() => {
+            clearUser();
+            window.location.href = "/login";
+          });
+      }
+    };
 
-  window.addEventListener("pageshow", handlePageShow);
-  return () => window.removeEventListener("pageshow", handlePageShow);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -54,9 +56,17 @@ const { setUser, clearUser } = useAuthStore();
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/review-queue" element={<ReviewQueuePage />} />
-        <Route path="/records" element={<AllRecordsPage/>} />
+        <Route path="/records" element={<AllRecordsPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/review/:id" element={<ReviewPage/>} />
+        <Route path="/review/:id" element={<ReviewPage />} />
+        <Route
+          path="/settings/api-keys"
+          element={
+            <AdminRoute>
+              <ApiKeysPage />
+            </AdminRoute>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />

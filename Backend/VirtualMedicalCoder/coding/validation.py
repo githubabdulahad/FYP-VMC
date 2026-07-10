@@ -69,7 +69,7 @@ class DatabaseCodingValidator:
         self._build_token_index()
 
     def _load_databases(self) -> None:
-        codes_dir = settings.BASE_DIR / "codes"
+        codes_dir = settings.BASE_DIR / "coding" / "reference_data"
 
         # Load ICD-10
         icd_path = codes_dir / "icd-10.csv"

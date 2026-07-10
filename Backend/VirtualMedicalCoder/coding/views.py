@@ -20,10 +20,43 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.authentication import JWTCookieAuthentication
+from organizations.authentication import OrganizationAPIKeyAuthentication
+from organizations.permissions import IsAuthenticatedOrHasAPIKeyScope
+from organizations.models import APIKeyScope, OrganizationAPIKey, ReviewMode
 from VirtualMedicalCoder.swagger import BAD_REQUEST, NOT_FOUND, UNAUTHORIZED
 from .models import CodingResult, ReviewFeedback
 from .serializers import CodingResultSerializer, ReviewSerializer, ReviewFeedbackSerializer
 from .code_retrieval import CodeRetriever
+
+
+def _scoped_results(request):
+    """
+    Returns the CodingResult queryset a caller is allowed to see:
+    - an organization API key sees every result belonging to its own
+      organization only (any of that partner's uploads)
+    - an internal user with can_review_partner_submissions=True sees their
+      own uploads AND every result currently in ASSISTED review mode,
+      regardless of which organization submitted it -- that is the entire
+      point of assisted mode: designated staff review on a partner's behalf
+    - any other logged-in user (a coder without the flag, or a non-internal
+      account) sees only their own results
+
+    Note: this filters on the organization's default review_mode. A
+    per-upload review_mode_override that disagrees with the org default is
+    not reflected in this queryset filter (it IS still enforced correctly
+    in CodingReviewView.post via resolved_review_mode()) -- a known
+    simplification, fine for now since overrides are expected to be rare.
+    """
+    if isinstance(request.auth, OrganizationAPIKey):
+        return CodingResult.objects.filter(organization=request.auth.organization)
+
+    user = request.user
+    if getattr(user, "can_review_partner_submissions", False):
+        from django.db.models import Q
+        return CodingResult.objects.filter(
+            Q(user=user) | Q(organization__review_mode=ReviewMode.ASSISTED)
+        )
+    return CodingResult.objects.filter(user=user)
 
 class CodingResultListView(APIView):
     """
@@ -31,8 +64,9 @@ class CodingResultListView(APIView):
     Returns all coding results for the currently logged-in user.
     """
 
-    authentication_classes = [JWTCookieAuthentication]
-    permission_classes     = [IsAuthenticated]
+    authentication_classes = [JWTCookieAuthentication, OrganizationAPIKeyAuthentication]
+    permission_classes     = [IsAuthenticatedOrHasAPIKeyScope]
+    required_scope         = APIKeyScope.READ
 
     @swagger_auto_schema(
         operation_summary="List coding results for current user",
@@ -41,8 +75,7 @@ class CodingResultListView(APIView):
     )
     def get(self, request):
         results = (
-            CodingResult.objects
-            .filter(user=request.user)
+            _scoped_results(request)
             .select_related("upload_record")
             .order_by("-created_at")
         )
@@ -56,8 +89,9 @@ class CodingResultDetailView(APIView):
     Returns one specific coding result (must belong to the current user).
     """
 
-    authentication_classes = [JWTCookieAuthentication]
-    permission_classes     = [IsAuthenticated]
+    authentication_classes = [JWTCookieAuthentication, OrganizationAPIKeyAuthentication]
+    permission_classes     = [IsAuthenticatedOrHasAPIKeyScope]
+    required_scope         = APIKeyScope.READ
 
     @swagger_auto_schema(
         operation_summary="Get one coding result",
@@ -69,10 +103,7 @@ class CodingResultDetailView(APIView):
     )
     def get(self, request, result_id):
         try:
-            result = CodingResult.objects.select_related("upload_record").get(
-                id=result_id,
-                user=request.user,
-            )
+            result = _scoped_results(request).select_related("upload_record").get(id=result_id)
         except CodingResult.DoesNotExist:
             return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -98,8 +129,9 @@ class CodingReviewView(APIView):
     }
     """
 
-    authentication_classes = [JWTCookieAuthentication]
-    permission_classes     = [IsAuthenticated]
+    authentication_classes = [JWTCookieAuthentication, OrganizationAPIKeyAuthentication]
+    permission_classes     = [IsAuthenticatedOrHasAPIKeyScope]
+    required_scope         = APIKeyScope.REVIEW
 
     @swagger_auto_schema(
         operation_summary="Human review: approve, reject, or revise codes",
@@ -127,10 +159,22 @@ class CodingReviewView(APIView):
     )
     def post(self, request, result_id):
         try:
-            result = CodingResult.objects.get(id=result_id, user=request.user)
+            result = _scoped_results(request).select_related("upload_record", "organization").get(id=result_id)
         except CodingResult.DoesNotExist:
             return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        api_key = request.auth if isinstance(request.auth, OrganizationAPIKey) else None
+
+        if api_key is not None:
+            if result.upload_record.resolved_review_mode() != ReviewMode.DIRECT:
+                return Response(
+                    {
+                        "error": "This organization is in assisted review mode. "
+                                 "Results must be reviewed by an internal coder, not the API key."
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            
         serializer = ReviewSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -144,8 +188,12 @@ class CodingReviewView(APIView):
 
         # Apply reviewer's decision
         result.review_status = data["review_status"]
-        result.reviewed_by = request.user
-        result.reviewed_at = datetime.now()
+        if api_key is not None:
+            result.reviewed_by = None
+            result.reviewed_by_api_key = api_key
+        else:
+            result.reviewed_by = request.user
+            result.reviewed_by_api_key = None
 
         # Apply optional corrections
         if "icd_codes" in data:
@@ -468,8 +516,9 @@ class CodingStatsView(APIView):
     }
     """
 
-    authentication_classes = [JWTCookieAuthentication]
-    permission_classes     = [IsAuthenticated]
+    authentication_classes = [JWTCookieAuthentication, OrganizationAPIKeyAuthentication]
+    permission_classes     = [IsAuthenticatedOrHasAPIKeyScope]
+    required_scope         = APIKeyScope.READ
 
     @swagger_auto_schema(
         operation_summary="Get coding statistics for the current user",
@@ -499,7 +548,7 @@ class CodingStatsView(APIView):
     def get(self, request):
         from django.db.models import Avg, Count, Q
 
-        qs = CodingResult.objects.filter(user=request.user)
+        qs = _scoped_results(request)
 
         agg = qs.aggregate(
             total=Count("id"),

@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const API_ROOT = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
 const api = axios.create({
-  baseURL: "http://localhost:8000/api", // change this to your actual DRF backend URL
+  baseURL: `${API_ROOT}/api/v1`,
   withCredentials: true, // makes the browser send the cookies with every request
 });
 

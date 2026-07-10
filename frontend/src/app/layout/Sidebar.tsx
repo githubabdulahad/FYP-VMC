@@ -8,6 +8,10 @@ function Sidebar() {
   const navigate = useNavigate();
   const { user, clearUser } = useAuthStore();
 
+  // ✅ Internal admin check
+  const isInternalAdmin =
+    user?.role === "admin" && user?.organization?.slug === "internal";
+
   // Fetch coding results to compute pending count
   const { data: allResults = [] } = useQuery({
     queryKey: ["codingResults"],
@@ -19,7 +23,7 @@ function Sidebar() {
     (result) => result.review_status === "pending"
   ).length;
 
-  // Build nav items with dynamic badge
+  // Build nav items with conditional API Keys
   const navItems = [
     {
       label: "Dashboard",
@@ -50,7 +54,7 @@ function Sidebar() {
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
         </svg>
       ),
-      badge: pendingCount, // ← NOW DYNAMIC
+      badge: pendingCount,
     },
     {
       label: "All Records",
@@ -62,6 +66,23 @@ function Sidebar() {
         </svg>
       ),
     },
+
+    // ✅ API Keys (ONLY for internal admin)
+    ...(isInternalAdmin
+      ? [
+          {
+            label: "API Keys",
+            path: "/settings/api-keys",
+            icon: (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15 7a4 4 0 11-7.446 2H3v2h4.554A4 4 0 1115 7z" />
+              </svg>
+            ),
+          },
+        ]
+      : []),
+
     {
       label: "Profile",
       path: "/profile",
@@ -78,14 +99,13 @@ function Sidebar() {
     try {
       await logoutUser();
     } catch {
-      // even if the API call fails, clear local state
+      // ignore errors
     } finally {
       clearUser();
       navigate("/login");
     }
   };
 
-  // get initials from username
   const initials = user?.username
     ? user.username.slice(0, 2).toUpperCase()
     : "MC";
@@ -111,6 +131,7 @@ function Sidebar() {
       <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest px-2 mb-2">
         Main
       </p>
+
       <nav className="flex flex-col gap-0.5">
         {navItems.map((item) => (
           <NavLink

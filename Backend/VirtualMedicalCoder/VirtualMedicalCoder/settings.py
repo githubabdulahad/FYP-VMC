@@ -40,19 +40,36 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "accounts.authentication.JWTCookieAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "organizations.authentication.OrganizationAPIKeyAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "organizations.throttling.OrgRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "300/hour",
+        "org": "1000/hour",
+    },
 }
 
 # SECURITY: load sensitive values from environment variables when available
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-q6^bvh)^6f-$0q^scnomny%0i(e+!6mi+-vopi8l96a#s69e@&")
-
 # DEBUG should be False in production. Use environment variable to control it.
 DEBUG = env_bool("DJANGO_DEBUG", True)
+
+_dev_fallback_secret = "django-insecure-q6^bvh)^6f-$0q^scnomny%0i(e+!6mi+-vopi8l96a#s69e@&"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", _dev_fallback_secret)
+
+if not DEBUG and SECRET_KEY == _dev_fallback_secret:
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY environment variable is not set. "
+        "Refusing to start with the hardcoded development secret key "
+        "while DJANGO_DEBUG=False. Set DJANGO_SECRET_KEY in your environment."
+    )
 
 # Hosts allowed to serve the app. Override in production via env variable.
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if host.strip()]
@@ -92,13 +109,12 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_yasg',
     'accounts',
+    'organizations',
     'ingestion',
     'nlp_engine',
     'coding',
     'reports'
 ]
-
-CORS_ALLOW_ALL_ORIGINS = True 
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",   # React dev server

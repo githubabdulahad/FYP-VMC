@@ -30,8 +30,19 @@ class CodingResult(models.Model):
         on_delete=models.CASCADE,
         related_name="coding_result",
     )
-    user           = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coding_results")
-
+    user           = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="coding_results",
+        null=True, blank=True,
+        help_text="Mirrors upload_record.user -- null for API-only submissions with no individual account.",
+    )
+    organization   = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="coding_results",
+        help_text="Denormalized from upload_record.organization at creation time, for fast org-scoped "
+                   "queries and permission checks without an extra join.",
+    )
     # SOAP note stored as a JSON object
     # e.g. {"subjective": "...", "objective": "...", "assessment": "...", "plan": "..."}
     soap_note      = models.JSONField(default=dict)
@@ -101,6 +112,14 @@ class CodingResult(models.Model):
         null=True,
         blank=True,
         related_name="reviewed_coding_results",
+    )
+    reviewed_by_api_key = models.ForeignKey(
+        "organizations.OrganizationAPIKey",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviews",
+        help_text="Set instead of reviewed_by when a partner reviews their own result directly via API key.",
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
 

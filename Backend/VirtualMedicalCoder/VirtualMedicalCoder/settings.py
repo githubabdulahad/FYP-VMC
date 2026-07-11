@@ -270,3 +270,19 @@ LOGGING = {
         "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
     },
 }
+
+# --- Cloudinary Configuration ---
+import cloudinary
+
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "dhinxvbpv")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
+CLOUDINARY_UPLOAD_PRESET = os.getenv("CLOUDINARY_UPLOAD_PRESET", "medical_unsigned")
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY or None,
+    api_secret=CLOUDINARY_API_SECRET or None,
+    secure=True
+)
+

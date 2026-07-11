@@ -206,9 +206,24 @@ def _run_nlp_and_save(record, user):
 # before for the web app.
 # ---------------------------------------------------------------------------
 
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from organizations.authentication import OrganizationAPIKeyAuthentication
 from organizations.permissions import HasAPIKeyScope
 from organizations.models import APIKeyScope
+from .cloudinary_utils import upload_file_to_cloudinary
+
+
+def guess_file_type(filename):
+    if not filename:
+        return "pdf"
+    ext = filename.split(".")[-1].lower()
+    if ext in ["pdf"]:
+        return "pdf"
+    elif ext in ["jpg", "jpeg", "png", "gif", "webp", "tiff", "bmp"]:
+        return "image"
+    elif ext in ["mp3", "wav", "m4a", "flac", "ogg", "aac", "webm"]:
+        return "audio"
+    return "pdf"
 
 
 class PartnerSubmitDocumentView(APIView):
@@ -218,15 +233,22 @@ class PartnerSubmitDocumentView(APIView):
     For a partner's server (EHR / insurer), not a browser. Authenticate with:
         Authorization: Bearer vmc_live_...
 
-    Body (raw text only for now -- file upload is a documented follow-up,
-    since it needs a server-side Cloudinary credential that doesn't exist
-    yet; see the enterprise readiness plan, section 9):
+    Body can be JSON (for raw text submissions) or multipart/form-data (for file uploads).
+
+    JSON payload:
         {
             "raw_text": "...",
             "file_name": "optional label",
             "submitted_by_employee": "optional -- e.g. 'J. Ahmed, RN'",
             "review_mode_override": "optional -- 'direct' or 'assisted'"
         }
+
+    Multipart/Form-Data:
+        file: Binary file (PDF, image, or audio)
+        file_type: "pdf" | "image" | "audio" (optional, will guess from filename extension if omitted)
+        file_name: "optional label"
+        submitted_by_employee: "optional -- e.g. 'J. Ahmed, RN'"
+        review_mode_override: "optional -- 'direct' or 'assisted'"
 
     The document is tagged with the calling organization automatically --
     the partner never specifies it themselves, so one organization's key
@@ -236,14 +258,23 @@ class PartnerSubmitDocumentView(APIView):
     authentication_classes = [OrganizationAPIKeyAuthentication]
     permission_classes = [HasAPIKeyScope]
     required_scope = APIKeyScope.SUBMIT
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     @swagger_auto_schema(
         operation_summary="Partner API: submit a clinical document",
+        manual_parameters=[
+            openapi.Parameter(
+                name="file",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                description="The clinical document file to upload (PDF, image, or audio)."
+            ),
+        ],
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=["raw_text"],
             properties={
-                "raw_text": openapi.Schema(type=openapi.TYPE_STRING),
+                "raw_text": openapi.Schema(type=openapi.TYPE_STRING, description="Required only if submitting raw text directly without a file."),
+                "file_type": openapi.Schema(type=openapi.TYPE_STRING, enum=["pdf", "image", "audio", "raw_text"], description="Type of the submission. If uploading a file, this defaults to guessing from the extension if not specified."),
                 "file_name": openapi.Schema(type=openapi.TYPE_STRING),
                 "submitted_by_employee": openapi.Schema(type=openapi.TYPE_STRING),
                 "review_mode_override": openapi.Schema(type=openapi.TYPE_STRING, enum=["direct", "assisted"]),
@@ -255,9 +286,39 @@ class PartnerSubmitDocumentView(APIView):
     def post(self, request):
         api_key = request.auth
 
-        serializer = UploadRecordCreateSerializer(
-            data={**request.data, "file_type": "raw_text"}
-        )
+        if "file" in request.FILES:
+            uploaded_file = request.FILES["file"]
+            
+            # Determine file type
+            file_type = request.data.get("file_type")
+            if not file_type or file_type == "raw_text":
+                file_type = guess_file_type(uploaded_file.name)
+                
+            # Upload file to Cloudinary
+            try:
+                file_url = upload_file_to_cloudinary(uploaded_file)
+            except Exception as exc:
+                logger.error(f"Cloudinary upload failed: {exc}")
+                return Response(
+                    {"error": f"Failed to upload file to cloud storage: {str(exc)}"},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+            
+            serializer_data = {
+                "file_url": file_url,
+                "file_type": file_type,
+                "file_name": request.data.get("file_name") or uploaded_file.name,
+                "raw_text": ""
+            }
+        else:
+            serializer_data = {
+                "file_url": "",
+                "file_type": "raw_text",
+                "file_name": request.data.get("file_name") or "Partner API submission",
+                "raw_text": request.data.get("raw_text", "")
+            }
+
+        serializer = UploadRecordCreateSerializer(data=serializer_data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -267,9 +328,10 @@ class PartnerSubmitDocumentView(APIView):
             organization=api_key.organization,
             submitted_by_employee=request.data.get("submitted_by_employee", ""),
             review_mode_override=request.data.get("review_mode_override", ""),
-            file_type="raw_text",
-            file_name=data.get("file_name", "") or "Partner API submission",
-            raw_text=data["raw_text"],
+            file_type=data["file_type"],
+            file_name=data.get("file_name", ""),
+            file_url=data.get("file_url", ""),
+            raw_text=data.get("raw_text", ""),
             status=UploadRecord.Status.PENDING,
         )
 
@@ -282,6 +344,7 @@ class PartnerSubmitDocumentView(APIView):
             record.save(update_fields=["status", "error_message"])
 
         return Response(UploadRecordResponseSerializer(record).data, status=status.HTTP_201_CREATED)
+
 
 
 class PartnerDocumentStatusView(APIView):

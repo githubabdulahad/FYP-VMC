@@ -1,4 +1,4 @@
-﻿# Core Django stack
+# Core Django stack
 Django==5.2.8
 djangorestframework==3.16.1
 djangorestframework-simplejwt==5.5.1
@@ -22,3 +22,5 @@ ollama>=0.6.0
 PyMuPDF==1.26.4
 Pillow==12.1.1
 # PyMuPDF, pytesseract, and openai-whisper are optional extras for PDF/image/audio extraction.
+cloudinary>=1.41.0
+

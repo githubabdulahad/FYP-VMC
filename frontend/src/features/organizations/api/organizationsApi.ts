@@ -5,6 +5,8 @@ export interface Organization {
   name: string;
   slug: string;
   review_mode: "assisted" | "direct";
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface OrganizationAPIKey {
@@ -23,8 +25,40 @@ export interface CreatedAPIKey extends OrganizationAPIKey {
   raw_key: string; // only present on the create response, never again
 }
 
-export const getOrganizations = async (): Promise<Organization[]> => {
-  const response = await api.get("/organizations/");
+export const getOrganizations = async (includeInactive = false): Promise<Organization[]> => {
+  const response = await api.get("/organizations/", {
+    params: includeInactive ? { include_inactive: "true" } : undefined,
+  });
+  return response.data;
+};
+
+export const createOrganization = async (payload: {
+  name: string;
+  review_mode?: "assisted" | "direct";
+}): Promise<Organization> => {
+  const response = await api.post("/organizations/", payload);
+  return response.data;
+};
+
+export const updateOrganization = async (
+  orgId: number,
+  payload: { name?: string; review_mode?: "assisted" | "direct" }
+): Promise<Organization> => {
+  const response = await api.patch(`/organizations/${orgId}/`, payload);
+  return response.data;
+};
+
+export const deactivateOrganization = async (orgId: number): Promise<Organization> => {
+  const response = await api.delete(`/organizations/${orgId}/`);
+  return response.data;
+};
+
+export const deleteOrganization = async (orgId: number): Promise<void> => {
+  await api.delete(`/organizations/${orgId}/`, { params: { hard: "true" } });
+};
+
+export const reactivateOrganization = async (orgId: number): Promise<Organization> => {
+  const response = await api.post(`/organizations/${orgId}/reactivate/`);
   return response.data;
 };
 
